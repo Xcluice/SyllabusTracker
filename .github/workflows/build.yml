@@ -17,8 +17,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.7
-      - run: gradle assembleDebug --no-daemon
-      - run: mv app/build/outputs/apk/debug/app-debug.apk SyllabusTracker.apk
+      - run: gradle assembleRelease --no-daemon
+      - run: mv app/build/outputs/apk/release/app-release.apk SyllabusTracker.apk
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
