@@ -9,6 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -158,9 +159,9 @@ fun App(st: Store) {
             Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars)) {
                 AnimatedContent(open, transitionSpec = {
                     if (targetState != null)
-                        (slideInHorizontally { w -> w / 3 } + fadeIn()) togetherWith (slideOutHorizontally { w -> -w / 6 } + fadeOut())
+                        (slideInHorizontally(tween(200)) { w -> w / 4 } + fadeIn(tween(200))) togetherWith (slideOutHorizontally(tween(200)) { w -> -w / 8 } + fadeOut(tween(120)))
                     else
-                        (slideInHorizontally { w -> -w / 6 } + fadeIn()) togetherWith (slideOutHorizontally { w -> w / 3 } + fadeOut())
+                        (slideInHorizontally(tween(200)) { w -> -w / 8 } + fadeIn(tween(200))) togetherWith (slideOutHorizontally(tween(200)) { w -> w / 4 } + fadeOut(tween(120)))
                 }, label = "nav") { id ->
                     if (id == null) Home(st) { open = it }
                     else SubjectScreen(st, SUBJECTS.first { s -> s.id == id }) { open = null }
