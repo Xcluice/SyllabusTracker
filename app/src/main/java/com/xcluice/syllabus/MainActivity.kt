@@ -125,6 +125,9 @@ class Store private constructor(ctx: Context) {
         lastDay = today
         p.edit().putInt("streak", streak).putLong("last", lastDay).apply()
     }
+    fun crash(): String? = p.getString("crash", null)
+    fun clearCrash() { p.edit().remove("crash").apply() }
+    fun logErr(e: Throwable) { p.edit().putString("crash", android.util.Log.getStackTraceString(e).take(1500)).commit() }
     private fun credit(sec: Int) { if (sec > 0) { todaySec += sec; saveSec() } }
     private fun saveTimer() {
         p.edit().putInt("t_state", tState).putInt("t_preset", tPreset).putInt("t_left", tLeft)
@@ -142,16 +145,16 @@ class Store private constructor(ctx: Context) {
         tEnd = System.currentTimeMillis() + tLeft * 1000L
         tState = 1
         markStudied(); saveTimer()
-        alarmMgr().setAlarmClock(AlarmManager.AlarmClockInfo(tEnd, Notifier.open(app)), alarmPI())
-        ContextCompat.startForegroundService(app, Intent(app, TimerService::class.java))
+        try { alarmMgr().setAlarmClock(AlarmManager.AlarmClockInfo(tEnd, Notifier.open(app)), alarmPI()) } catch (e: Throwable) { logErr(e) }
+        try { Notifier.showRunning(app, tEnd) } catch (e: Throwable) { logErr(e) }
     }
     fun pauseTimer() {
         if (tState != 1) return
         val r = remaining(); credit(tBase - r); tLeft = r; tState = 2
-        alarmMgr().cancel(alarmPI()); app.stopService(Intent(app, TimerService::class.java)); saveTimer()
+        alarmMgr().cancel(alarmPI()); Notifier.cancelRunning(app); saveTimer()
     }
     fun resetTimer() {
-        if (tState == 1) { credit(tBase - remaining()); alarmMgr().cancel(alarmPI()); app.stopService(Intent(app, TimerService::class.java)) }
+        if (tState == 1) { credit(tBase - remaining()); alarmMgr().cancel(alarmPI()); Notifier.cancelRunning(app) }
         tLeft = tPreset * 60; tState = 0; saveTimer()
     }
     fun setPreset(m: Int) { if (tState == 1) return; tPreset = m; tLeft = m * 60; tState = 0; saveTimer() }
@@ -193,6 +196,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val store = Store.get(applicationContext)
+        val prev = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            try { store.logErr(e) } catch (x: Throwable) { }
+            prev?.uncaughtException(t, e)
+        }
         setContent { App(store) }
     }
 }
@@ -204,7 +212,16 @@ fun App(st: Store) {
     var open by rememberSaveable { mutableStateOf<String?>(null) }
     // Back press: subject screen -> home. On home it exits the app normally.
     BackHandler(enabled = open != null) { open = null }
+    var crash by remember { mutableStateOf(st.crash()) }
     CompositionLocalProvider(LocalPal provides pal) {
+        crash?.let { msg ->
+            AlertDialog(
+                onDismissRequest = { st.clearCrash(); crash = null }, containerColor = pal.card,
+                title = { T("App error (send me a screenshot)", 16) },
+                text = { T(msg, 10, FontWeight.Normal, pal.sub) },
+                confirmButton = { T("OK", 15, mod = Modifier.tap { st.clearCrash(); crash = null }.padding(12.dp)) }
+            )
+        }
         Box(Modifier.fillMaxSize().background(pal.bg)) {
             Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars)) {
                 AnimatedContent(open, transitionSpec = {
