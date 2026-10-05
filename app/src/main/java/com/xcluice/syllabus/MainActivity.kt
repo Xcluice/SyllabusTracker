@@ -1,8 +1,17 @@
 package com.xcluice.syllabus
 
+import android.Manifest
+import android.app.AlarmManager
 import android.app.DatePickerDialog
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -48,8 +57,19 @@ import kotlin.math.ceil
 import kotlin.math.max
 
 // ---------- Store (all state + saving) ----------
-class Store(ctx: Context) {
+class Store private constructor(ctx: Context) {
+    companion object {
+        @Volatile private var inst: Store? = null
+        fun get(c: Context): Store = inst ?: synchronized(this) { inst ?: Store(c.applicationContext).also { inst = it } }
+    }
+    private val app = ctx.applicationContext
     private val p = ctx.getSharedPreferences("t2", Context.MODE_PRIVATE)
+    // Timer state lives here (survives swipe-away); 0 idle, 1 running, 2 paused
+    var tState by mutableIntStateOf(p.getInt("t_state", 0))
+    var tPreset by mutableIntStateOf(p.getInt("t_preset", 25))
+    var tLeft by mutableIntStateOf(p.getInt("t_left", 25 * 60))
+    var tEnd by mutableLongStateOf(p.getLong("t_end", 0L))
+    private var tBase = p.getInt("t_base", 0)
     val flags = mutableStateMapOf<String, Int>() // bit1 done, bit2 revised, bit4 weak star
     var examDay by mutableLongStateOf(p.getLong("exam", 0L))
     var lastDay by mutableLongStateOf(p.getLong("last", 0L))
@@ -105,7 +125,37 @@ class Store(ctx: Context) {
         lastDay = today
         p.edit().putInt("streak", streak).putLong("last", lastDay).apply()
     }
-    fun addSec() { todaySec++; if (todaySec % 15 == 0) saveSec() }
+    private fun credit(sec: Int) { if (sec > 0) { todaySec += sec; saveSec() } }
+    private fun saveTimer() {
+        p.edit().putInt("t_state", tState).putInt("t_preset", tPreset).putInt("t_left", tLeft)
+            .putInt("t_base", tBase).putLong("t_end", tEnd).apply()
+    }
+    private fun alarmPI() = PendingIntent.getBroadcast(app, 7, Intent(app, TimerReceiver::class.java),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+    private fun alarmMgr() = app.getSystemService(AlarmManager::class.java)
+    fun remaining(now: Long = System.currentTimeMillis()): Int =
+        if (tState == 1) max(0, ((tEnd - now + 999) / 1000).toInt()) else tLeft
+    fun startTimer() {
+        if (tState == 1) return
+        if (tLeft <= 0) tLeft = tPreset * 60
+        tBase = tLeft
+        tEnd = System.currentTimeMillis() + tLeft * 1000L
+        tState = 1
+        markStudied(); saveTimer()
+        alarmMgr().setAlarmClock(AlarmManager.AlarmClockInfo(tEnd, Notifier.open(app)), alarmPI())
+        ContextCompat.startForegroundService(app, Intent(app, TimerService::class.java))
+    }
+    fun pauseTimer() {
+        if (tState != 1) return
+        val r = remaining(); credit(tBase - r); tLeft = r; tState = 2
+        alarmMgr().cancel(alarmPI()); app.stopService(Intent(app, TimerService::class.java)); saveTimer()
+    }
+    fun resetTimer() {
+        if (tState == 1) { credit(tBase - remaining()); alarmMgr().cancel(alarmPI()); app.stopService(Intent(app, TimerService::class.java)) }
+        tLeft = tPreset * 60; tState = 0; saveTimer()
+    }
+    fun setPreset(m: Int) { if (tState == 1) return; tPreset = m; tLeft = m * 60; tState = 0; saveTimer() }
+    fun finishTimer() { if (tState != 1) return; credit(tBase); tLeft = 0; tState = 0; saveTimer() }
     fun saveSec() {
         p.edit().putInt("sec", todaySec).putLong("secDay", LocalDate.now().toEpochDay()).apply()
     }
@@ -142,7 +192,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        val store = Store(applicationContext)
+        val store = Store.get(applicationContext)
         setContent { App(store) }
     }
 }
@@ -272,15 +322,12 @@ fun InfoRow(st: Store) {
 @Composable
 fun TimerCard(st: Store) {
     val pal = LocalPal.current
-    var preset by remember { mutableIntStateOf(25) }
-    var left by remember { mutableIntStateOf(25 * 60) }
-    var run by remember { mutableStateOf(false) }
-    LaunchedEffect(run) {
-        if (run) st.markStudied()
-        while (run && left > 0) { delay(1000); left--; st.addSec() }
-        if (left == 0) run = false
-        st.saveSec()
-    }
+    val ctx = LocalContext.current
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(st.tState) { while (st.tState == 1) { now = System.currentTimeMillis(); delay(250) } }
+    val left = st.remaining(now)
+    val running = st.tState == 1
+    val askNotif = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     val teal = Color(0xFF06B6D4)
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(pal.card).border(1.5.dp, teal.copy(alpha = .4f), RoundedCornerShape(20.dp)).padding(14.dp),
@@ -290,9 +337,9 @@ fun TimerCard(st: Store) {
             T("⏱ Study timer", 15)
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf(15, 25, 45).forEach { m ->
-                    val on = preset == m
+                    val on = st.tPreset == m
                     Box(Modifier.clip(CircleShape).background(if (on) teal else teal.copy(alpha = .15f))
-                        .tap { if (!run) { preset = m; left = m * 60 } }.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                        .tap { st.setPreset(m) }.padding(horizontal = 12.dp, vertical = 6.dp)) {
                         T("$m", 12, c = if (on) Color.White else teal)
                     }
                 }
@@ -300,15 +347,23 @@ fun TimerCard(st: Store) {
         }
         T("%02d:%02d".format(left / 60, left % 60), 44, FontWeight.Black, teal, Modifier.fillMaxWidth(), align = TextAlign.Center)
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Box(Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(if (run) Color(0xFFF59E0B) else Color(0xFF10B981))
-                .tap { if (!run && left == 0) left = preset * 60; run = !run }.padding(12.dp), contentAlignment = Alignment.Center) {
-                T(if (run) "Pause" else "Start", 14, c = Color.White)
+            Box(Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(if (running) Color(0xFFF59E0B) else Color(0xFF10B981))
+                .tap {
+                    if (running) st.pauseTimer() else {
+                        if (Build.VERSION.SDK_INT >= 33 &&
+                            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                        ) askNotif.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        st.startTimer()
+                    }
+                }.padding(12.dp), contentAlignment = Alignment.Center) {
+                T(if (running) "Pause" else if (st.tState == 2) "Resume" else "Start", 14, c = Color.White)
             }
             Box(Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(pal.line)
-                .tap { run = false; left = preset * 60 }.padding(12.dp), contentAlignment = Alignment.Center) {
+                .tap { st.resetTimer() }.padding(12.dp), contentAlignment = Alignment.Center) {
                 T("Reset", 14)
             }
         }
+        T("Keeps running in the background, even if you close the app", 11, FontWeight.Normal, pal.sub, Modifier.fillMaxWidth(), align = TextAlign.Center)
     }
 }
 
