@@ -9,12 +9,28 @@ android {
         applicationId = "com.xcluice.syllabus"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+    signingConfigs {
+        create("rel") {
+            storeFile = file("../release.jks")
+            storePassword = "xcluice123"
+            keyAlias = "key"
+            keyPassword = "xcluice123"
+        }
+    }
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = signingConfigs.getByName("rel")
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
