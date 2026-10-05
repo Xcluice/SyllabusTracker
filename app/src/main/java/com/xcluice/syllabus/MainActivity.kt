@@ -7,7 +7,9 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import android.os.Bundle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -136,6 +138,9 @@ class Store private constructor(ctx: Context) {
     private fun alarmPI() = PendingIntent.getBroadcast(app, 7, Intent(app, TimerReceiver::class.java),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     private fun alarmMgr() = app.getSystemService(AlarmManager::class.java)
+    fun canExact() = Build.VERSION.SDK_INT < 31 || alarmMgr().canScheduleExactAlarms()
+    fun exactAsked() = p.getBoolean("exactAsked", false)
+    fun markExactAsked() { p.edit().putBoolean("exactAsked", true).apply() }
     fun remaining(now: Long = System.currentTimeMillis()): Int =
         if (tState == 1) max(0, ((tEnd - now + 999) / 1000).toInt()) else tLeft
     fun startTimer() {
@@ -145,7 +150,10 @@ class Store private constructor(ctx: Context) {
         tEnd = System.currentTimeMillis() + tLeft * 1000L
         tState = 1
         markStudied(); saveTimer()
-        try { alarmMgr().setAlarmClock(AlarmManager.AlarmClockInfo(tEnd, Notifier.open(app)), alarmPI()) } catch (e: Throwable) { logErr(e) }
+        try { alarmMgr().setAlarmClock(AlarmManager.AlarmClockInfo(tEnd, Notifier.open(app)), alarmPI()) }
+        catch (e: SecurityException) {
+            try { alarmMgr().setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, tEnd, alarmPI()) } catch (x: Throwable) { logErr(x) }
+        } catch (e: Throwable) { logErr(e) }
         try { Notifier.showRunning(app, tEnd) } catch (e: Throwable) { logErr(e) }
     }
     fun pauseTimer() {
@@ -370,6 +378,10 @@ fun TimerCard(st: Store) {
                         if (Build.VERSION.SDK_INT >= 33 &&
                             ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
                         ) askNotif.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        if (!st.canExact() && !st.exactAsked()) {
+                            st.markExactAsked()
+                            try { ctx.startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:" + ctx.packageName))) } catch (e: Exception) { }
+                        }
                         st.startTimer()
                     }
                 }.padding(12.dp), contentAlignment = Alignment.Center) {
