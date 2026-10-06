@@ -263,7 +263,7 @@ fun Home(st: Store, onOpen: (String) -> Unit) {
                 }
                 Column {
                     T("T2 Syllabus Tracker", 21, FontWeight.Black)
-                    T("JKBOSE Class 9 · Term II", 13, c = pal.sub)
+                    T("JKBOSE Class 9 · T2 / Annual", 13, c = pal.sub)
                 }
             }
         }
