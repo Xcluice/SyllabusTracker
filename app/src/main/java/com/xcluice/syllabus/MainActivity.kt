@@ -91,6 +91,15 @@ class Store private constructor(ctx: Context) {
                 flags[kv[0]] = kv[1].toIntOrNull() ?: 0
             }
         }
+        if (raw != null && p.getInt("dv", 0) < 2) {
+            // syllabus updated for Science / Social Science / Urdu: clear their old ticks
+            flags.keys.filter { it.startsWith("s.") || it.startsWith("ss.") || it.startsWith("u.") }.toList().forEach { flags.remove(it) }
+            SUBJECTS.filter { it.id == "s" }.forEach { sub ->
+                sub.groups.forEachIndexed { gi, g -> g.items.indices.forEach { ii -> flags["${sub.id}.$gi.$ii"] = 1 } }
+            }
+            saveFlags()
+        }
+        p.edit().putInt("dv", 2).apply()
         val today = LocalDate.now().toEpochDay()
         streak = if (lastDay >= today - 1) p.getInt("streak", 0) else 0
         todaySec = if (p.getLong("secDay", 0L) == today) p.getInt("sec", 0) else 0
@@ -263,7 +272,7 @@ fun Home(st: Store, onOpen: (String) -> Unit) {
                 }
                 Column {
                     T("T2 Syllabus Tracker", 21, FontWeight.Black)
-                    T("JKBOSE Class 9 · T2 / Annual", 13, c = pal.sub)
+                    T("JKBOSE Class 9 · Term II", 13, c = pal.sub)
                 }
             }
         }
