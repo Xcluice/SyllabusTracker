@@ -279,6 +279,7 @@ fun Home(st: Store, onOpen: (String) -> Unit) {
         item("hero") { Hero(st) }
         item("info") { InfoRow(st) }
         item("timer") { TimerCard(st) }
+        item("dates") { DateSheet() }
         items(SUBJECTS.chunked(2), key = { it[0].id }) { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 row.forEach { SubjectCard(st, it, Modifier.weight(1f), onOpen) }
@@ -512,6 +513,54 @@ fun ItemRow(st: Store, s: Subject, r: RowI) {
                 contentAlignment = Alignment.Center) { T("↻", 17, c = if (rev) Color.White else pal.sub) }
             Box(Modifier.size(34.dp).tap { st.toggle(key, 4) }, contentAlignment = Alignment.Center) {
                 T(if (star) "★" else "☆", 24, c = if (star) Color(0xFFF59E0B) else pal.sub)
+            }
+        }
+    }
+}
+
+
+// ---------- T2 Date sheet (fixed by school) ----------
+class Exam(val day: LocalDate, val label: String, val name: String, val emoji: String, val color: Color)
+val DATESHEET = listOf(
+    Exam(LocalDate.of(2026, 10, 12), "Mon, 12 Oct", "Urdu", "✍️", Color(0xFFA855F7)),
+    Exam(LocalDate.of(2026, 10, 14), "Wed, 14 Oct", "Science", "🔬", Color(0xFF10B981)),
+    Exam(LocalDate.of(2026, 10, 16), "Fri, 16 Oct", "Mathematics", "📐", Color(0xFF6366F1)),
+    Exam(LocalDate.of(2026, 10, 17), "Sat, 17 Oct", "Automotive", "🚗", Color(0xFF06B6D4)),
+    Exam(LocalDate.of(2026, 10, 19), "Mon, 19 Oct", "English", "📖", Color(0xFFEC4899)),
+    Exam(LocalDate.of(2026, 10, 21), "Wed, 21 Oct", "Social Science", "🌏", Color(0xFFF59E0B))
+)
+
+@Composable
+fun DateSheet() {
+    val pal = LocalPal.current
+    val today = LocalDate.now().toEpochDay()
+    val next = DATESHEET.indexOfFirst { it.day.toEpochDay() >= today }
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(pal.card)
+            .border(1.5.dp, pal.line, RoundedCornerShape(20.dp)).padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        T("🗓 T2 Date Sheet", 15)
+        T("Exam time 1:30 PM · reach the hall 20 min early · no mobile phones", 11, FontWeight.Normal, pal.sub)
+        DATESHEET.forEachIndexed { idx, e ->
+            val d = (e.day.toEpochDay() - today).toInt()
+            val past = d < 0
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                    .background(if (idx == next) e.color.copy(alpha = .15f) else Color.Transparent)
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Box(Modifier.size(38.dp).clip(RoundedCornerShape(12.dp)).background(e.color.copy(alpha = .18f)), contentAlignment = Alignment.Center) {
+                    Text(e.emoji, fontSize = 18.sp)
+                }
+                Column(Modifier.weight(1f)) {
+                    T(e.name, 15, c = if (past) pal.sub else pal.ink, deco = if (past) TextDecoration.LineThrough else null)
+                    T(e.label, 12, FontWeight.SemiBold, pal.sub)
+                }
+                Box(Modifier.clip(CircleShape).background(e.color.copy(alpha = .15f)).padding(horizontal = 10.dp, vertical = 4.dp)) {
+                    T(when { past -> "Done"; d == 0 -> "Today"; d == 1 -> "Tomorrow"; else -> "in $d days" }, 12, c = e.color)
+                }
             }
         }
     }
